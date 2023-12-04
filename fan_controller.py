@@ -8,6 +8,7 @@ https://abyz.me.uk/rpi/pigpio/examples.html as "RPM Monitor"
 """
 
 import time
+import numpy as np
 import pigpio # http://abyz.co.uk/rpi/pigpio/python.html
 
 # Set GPIO pin numbers (BCM naming). See https://pinout.xyz/
@@ -15,7 +16,10 @@ PWM_GPIO = 18
 RPM_GPIO = 24
 
 # Set interval time in seconds at which temperature and rpm are to be measured
-LOOP_DURATION = 30
+LOOP_DURATION = 5
+
+HYSTERESIS = 2
+HYSTERESIS_STUCK_COUNTER = 10
 
 # Set path to file which contains the measured temperature of the ds18b20
 # temperature sensor
@@ -156,16 +160,23 @@ class FanController:
         duty cycle.
         """
 
+        # TODO MOVE THIS TO CONFIG FILE
         # Temperature threshold in degrees Celcius to which the duty cycle is
         # orientated. These values are highly depending on personell
         # preferences, location, season, etc.
         #
         # Set these to your liking.
+        duty_cycle_min = 51
+        duty_cycle_max = 255
+        thresholds = [22, 27, 32, 40]
+        # TODO
 
-        threshold_one = 22
-        threshold_two = 27
-        threshold_three = 32
-        threshold_four = 40
+        # Generate further values with equal spacing between the lowest and 
+        # highest specified values for the duty cycle. The total number of 
+        # values corresponds to the number of thresholds plus 1. The values 
+        # must be rounded, as only integers between 0 and 255 are permitted.
+        duty_cycle_values = np.round(np.linspace(duty_cycle_min, \
+            duty_cycle_max, len(thresholds)+1)).astype(int)
 
         # Set value to given value/value of last loop
         duty_cycle_value = self.duty_cycle_value
@@ -179,59 +190,72 @@ class FanController:
         # Contrary, if the temperature rises and surpass the upper threshold
         # despite the faster spinning fans, the flag will also get set to False
         # to let the controller react to this uncommon circumstance.
-
-        # RIGHT NOW, THIS IS HARDCODED. I WILL FIND A SHORTER, MORE DYNAMIC WAY
-        # LATER. (HOPEFULLY...)
-        print(self.from_higher_threshold)
         if self.from_higher_threshold:
-            if duty_cycle_value == 90 and (temperature < threshold_one - 2 \
-                    or temperature >= threshold_two):
-                self.from_higher_threshold = False
-            elif duty_cycle_value == 128 and (temperature < threshold_two - 2 \
-                    or temperature >= threshold_three):
-                self.from_higher_threshold = False
-            elif duty_cycle_value == 191 and (temperature < threshold_three - 2 \
-                    or temperature >= threshold_four):
-                self.from_higher_threshold = False
-            elif duty_cycle_value == 255 and temperature < threshold_four - 2:
-                self.from_higher_threshold = False
+            # Loop through possible values of duty cycles
+            for i in range(len(duty_cycle_values)):
+                # Important check to prevent IndexError. There is one more entry
+                # for duty cycle values as for thresholds. Thus, the index for
+                # the last duty cycle value will be out of bounds.
+                if i+1 < len(duty_cycle_values):
+                    # Check if the temperatue value is still within the duty
+                    # cycle's thresholds. If not, set flag to False to enter
+                    # the section to set the duty cycle value.
+                    if duty_cycle_values[i] == duty_cycle_value \
+                            and (temperature < (thresholds[i-1] - HYSTERESIS) \
+                            or temperature >= thresholds[i]):
+                        
+                        self.from_higher_threshold = False
+                        break
+                # This else statement covers the exception mentioned above. The
+                # highest duty cycle value is linked to the highest threshold.
+                else:
+                    if duty_cycle_values[-1] == duty_cycle_value \
+                            and (temperature < (thresholds[-1] - HYSTERESIS)):
+                        
+                        self.from_higher_threshold = False
+                        break
 
             # If the temperature is stuck in the hysteresis (e.g. coming from
             # 23.5 degree Celcius down to 21.5 degree Celsius) and therefore
             # the fans do not spin down to 20% duty cycle, the counter below
             # increases every loop from_higher_threshold is True. If it
-            # reaches a set value it sets from_higher_threshold to False and
-            # let the controller reevaluate its duty cycle setting.
+            # reaches a set value from_higher_threshold switches to False.
+            # The controller will reevaluate its duty cycle setting.
+            #
             # At a loop time of 30 seconds a counter limit of 10 would let
             # the controller reevaluate its duty cycle setting after 5
             # minutes of being stuck in the hysteresis.
-
             self.counter += 1
-
-            if self.counter > 10:
+            if self.counter > HYSTERESIS_STUCK_COUNTER:
                 self.from_higher_threshold = False
-                self.counter = 0
+                self.counter = 0    # Reset counter
 
-        # If it is the first loop after starting the script or hysteresis of 2
-        # degrees Celcius is undercut, set duty cycle accordingly to temperature
-
+        # If it is the first loop after starting the script or thresholds are
+        # met set duty cycle accordingly to temperature
         if not self.from_higher_threshold:
-            if temperature < threshold_one:
-                duty_cycle_value = 51
-            elif threshold_one <= temperature <= threshold_two:
-                duty_cycle_value = 90
-            elif threshold_two <= temperature <= threshold_three:
-                duty_cycle_value = 128
-            elif threshold_three <= temperature <= threshold_four:
-                duty_cycle_value = 191
-            elif temperature > threshold_four:
-                duty_cycle_value = 255
+            # If temperature is below lowest threshold, set fans to lowest
+            # duty cycle
+            if temperature < thresholds[0]:
+                duty_cycle_value = duty_cycle_values[0]
+            # If temperature is above highest threshold, set fans to highest
+            # duty cycle
+            elif temperature > thresholds[-1]:
+                duty_cycle_value = duty_cycle_values[-1]
+            # If temperetarue lies between lowest and highest threshold loop
+            # through thresholds and check between which. Set duty cycle
+            # accordingly
+            else:
+                for i in range(len(thresholds)-1):
+                    if thresholds[i] <= temperature <= thresholds[i+1]:
+                        duty_cycle_value = duty_cycle_values[i+1]
+                        break
 
-            # If the duty cycle is set to a higher value then 51 and therefore
-            # a lower threshold exists, set from_higher_value to True so it can
-            # be checked if the hysteresis is met next loop.
+            # If the duty cycle is set to a higher value then the lowest and 
+            # therefore a threshold below exists, set from_higher_value to True 
+            # so it will be checked if a threshold is met next loop.
+            if duty_cycle_value > duty_cycle_values[0] \
+                    and not self.from_higher_threshold:
 
-            if duty_cycle_value > 51 and not self.from_higher_threshold:
                 self.from_higher_threshold = True
                 self.counter = 0 # Reset "stuck in hysteresis" counter
 
