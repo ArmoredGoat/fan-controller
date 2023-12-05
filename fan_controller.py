@@ -11,6 +11,8 @@ import time
 import numpy as np
 import pigpio # http://abyz.co.uk/rpi/pigpio/python.html
 import prometheus_client as prom
+import os
+import json
 
 
 
@@ -27,6 +29,8 @@ HYSTERESIS_STUCK_COUNTER = 10
 # Set path to file which contains the measured temperature of the ds18b20
 # temperature sensor
 PATH_TEMPERATURE_FILE = "/sys/bus/w1/devices/28-00000ca660dd/w1_slave"
+ENABLE_LOCAL_EXPORT = True
+PATH_EXPORT_FILE = "/tmp/fan-controller/latest-values.json"
 
 ENABLE_PROMETHEUS_EXPORTER = True
 PROMETHEUS_PORT = 8080
@@ -35,7 +39,8 @@ class FanController:
     """
     A class to read speedometer pulses and calculate the RPM.
     """
-    def __init__(self, pi, gpio, pulses_per_rev=2.0, weighting=0.5, min_rpm=5.0):
+    def __init__(self, pi, gpio, pulses_per_rev=2.0, weighting=0.5, \
+        min_rpm=5.0):
         """
         Instantiate with the Pi and gpio of the RPM signal
         to monitor.
@@ -129,6 +134,7 @@ class FanController:
         self._cb.cancel()
         
         print("Clean up...")
+
         pi.stop()
 
 
@@ -255,8 +261,8 @@ class FanController:
                         duty_cycle_value = duty_cycle_values[i+1]
                         break
 
-            # If the duty cycle is set to a higher value then the lowest and 
-            # therefore a threshold below exists, set from_higher_value to True 
+            # If the duty cycle is set to a higher value then the lowest and
+            # therefore a threshold below exists, set from_higher_value to True
             # so it will be checked if a threshold is met next loop.
             if duty_cycle_value > duty_cycle_values[0] \
                     and not self.from_higher_threshold:
@@ -277,10 +283,14 @@ class FanController:
         Function to define metrics and start a http server to export them.
         """
 
-        # Create metrics to track rpm, temperature and duty cycle values over time.
-        self.gauge_rpm = prom.Gauge('fan_controller_rpm', 'Current rotations per minute in rpm')
-        self.gauge_temperature = prom.Gauge('fan_controller_temperature', 'Current temperature in Celsius degree')
-        self.gauge_duty_cycle = prom.Gauge('fan_controller_duty_cycle', 'Current duty cycle in percent')
+        # Create metrics to track rpm, temperature and duty cycle values 
+        # over time.
+        self.gauge_rpm = prom.Gauge('fan_controller_rpm', \
+            'Current rotations per minute in rpm')
+        self.gauge_temperature = prom.Gauge('fan_controller_temperature', \
+            'Current temperature in Celsius degree')
+        self.gauge_duty_cycle = prom.Gauge('fan_controller_duty_cycle', \
+            'Current duty cycle in percent')
 
         # Start http server on given port to export the metrics.
         prom.start_http_server(port)
@@ -294,50 +304,92 @@ class FanController:
         self.gauge_temperature.set(temperature)
         self.gauge_duty_cycle.set(duty_cycle)
         self.gauge_rpm.set(rpm)
+    
+    def export_values(self, path, temperature, rpm, duty_cycle):
+        """
+        Function to export values to file.
+        """
+        
+        # Create dictionary with values.
+        values = {
+            "temperature": temperature,
+            "rpm": rpm,
+            "duty cycle": duty_cycle,
+        }
 
+        # Split path string on last occurrence (first from right) of '/'
+        # to get the directory path.  
+        path_directory = path.rsplit('/', 1)[0]
+
+        # Create directory if it does not exist already.
+        try:
+            os.makedirs(path_directory)
+        except FileExistsError:
+            # Directory already exists.
+            pass
+    
+        # Write dictionary as string to file.
+        with open(path, "w") as file:
+            file.write(f"{values}")
 
 def main():
     """
     Main function to aggregate and call other needed functions.
     """
 
-    # Create object of pi class
-    pi = pigpio.pi()
+    ### I N I T I A L I Z A T I O N
 
-    # Create object of FanController class
+    # Create pi object with pigpio's pi class.
+    pi = pigpio.pi()
+    # Create fan controller object of FanController class.
     p = FanController(pi, RPM_GPIO)
 
-    # If exporting with Prometheus is enabled, initalize metrics and server
+    # If exporting with Prometheus is enabled, initalize metrics and server.
     if ENABLE_PROMETHEUS_EXPORTER:
         p.init_prometheus_exporter(PROMETHEUS_PORT)
 
-
+    ### M A I N   L O O P
     try:
         while True:
-            # Set start time to determine when the next loop shall start
+            # Set start time to determine when the next loop should start.
             time_start = time.time()
 
-            # Get temperature from sensor
-            temperature = p.get_temperature(PATH_TEMPERATURE_FILE)
-            duty_cycle = p.get_duty_cycle(temperature)
-            pi.set_PWM_dutycycle(PWM_GPIO, duty_cycle[0])
-            rpm = p.get_rpm()
-            
-            #print(f"T={temperature}°C")
-            #print(f"DC={duty_cycle[1]}%")
-            #print(f"RPM={int(rpm + 0.5)}\n")
+            ### G A T H E R   V A L U E S
 
+            # Get temperature from sensor and round it to one decimal place.
+            temperature = round(p.get_temperature(PATH_TEMPERATURE_FILE), 1)
+            # Get duty cycle value accordingly to temperature.
+            duty_cycle_percent, duty_cycle_decimal = \
+                p.get_duty_cycle(temperature)
+            # Get RPM and convert to rounded integer.
+            rpm = round(p.get_rpm())
+            
+            ### S E T   V A L U E S
+
+            # Set PWM duty cycle and send it to fan.
+            pi.set_PWM_dutycycle(PWM_GPIO, duty_cycle_percent)
+
+            ### E X P O R T I N G
+
+            # If exporting to local file is enabled, export.
+            if ENABLE_LOCAL_EXPORT:
+                p.export_values(PATH_EXPORT_FILE, temperature, rpm, \
+                    duty_cycle_decimal)
             # If exporting to Prometheus is enabled, update metrics every loop.
             if ENABLE_PROMETHEUS_EXPORTER:
-                p.update_metrics(temperature, rpm, duty_cycle[1])
+                p.update_metrics(temperature, rpm, duty_cycle_decimal)
 
-            # Wait until desired loop duration is reached until starting the
-            # next loop.
+            ### w A I T I N G   R O O M
+
+            # Wait until loop duration is reached until starting next loop.
             while (time.time() - time_start) < LOOP_DURATION:
                 time.sleep(0.2)
+
+    ### S T U F F   T O   D O   A F T E R   S T O P P I N G   S C R I P T
     finally:
         p.clean_up(pi)
 
 
+# Call main() function if this file is run directly instead of being imported.
 if __name__ == "__main__":
     main()
