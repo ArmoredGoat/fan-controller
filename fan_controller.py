@@ -10,6 +10,9 @@ https://abyz.me.uk/rpi/pigpio/examples.html as "RPM Monitor"
 import time
 import numpy as np
 import pigpio # http://abyz.co.uk/rpi/pigpio/python.html
+import prometheus_client as prom
+
+
 
 # Set GPIO pin numbers (BCM naming). See https://pinout.xyz/
 PWM_GPIO = 18
@@ -25,6 +28,8 @@ HYSTERESIS_STUCK_COUNTER = 10
 # temperature sensor
 PATH_TEMPERATURE_FILE = "/sys/bus/w1/devices/28-00000ca660dd/w1_slave"
 
+ENABLE_PROMETHEUS_EXPORTER = True
+PROMETHEUS_PORT = 8080
 
 class FanController:
     """
@@ -267,6 +272,29 @@ class FanController:
 
         return [duty_cycle_value, duty_cycle_percent]
 
+    def init_prometheus_exporter(self, port):
+        """
+        Function to define metrics and start a http server to export them.
+        """
+
+        # Create metrics to track rpm, temperature and duty cycle values over time.
+        self.gauge_rpm = prom.Gauge('fan_controller_rpm', 'Current rotations per minute in rpm')
+        self.gauge_temperature = prom.Gauge('fan_controller_temperature', 'Current temperature in Celsius degree')
+        self.gauge_duty_cycle = prom.Gauge('fan_controller_duty_cycle', 'Current duty cycle in percent')
+
+        # Start http server on given port to export the metrics.
+        prom.start_http_server(port)
+
+    def update_metrics(self, temperature, rpm, duty_cycle):
+        """
+        Function to update metric values.
+        """
+        
+        # Update metrics with given values.
+        self.gauge_temperature.set(temperature)
+        self.gauge_duty_cycle.set(duty_cycle)
+        self.gauge_rpm.set(rpm)
+
 
 def main():
     """
@@ -279,6 +307,11 @@ def main():
     # Create object of FanController class
     p = FanController(pi, RPM_GPIO)
 
+    # If exporting with Prometheus is enabled, initalize metrics and server
+    if ENABLE_PROMETHEUS_EXPORTER:
+        p.init_prometheus_exporter(PROMETHEUS_PORT)
+
+
     try:
         while True:
             # Set start time to determine when the next loop shall start
@@ -286,15 +319,17 @@ def main():
 
             # Get temperature from sensor
             temperature = p.get_temperature(PATH_TEMPERATURE_FILE)
-            print(f"T={temperature}°C")
-
             duty_cycle = p.get_duty_cycle(temperature)
-            print(f"DC={duty_cycle[1]}%")
             pi.set_PWM_dutycycle(PWM_GPIO, duty_cycle[0])
-
             rpm = p.get_rpm()
+            
+            #print(f"T={temperature}°C")
+            #print(f"DC={duty_cycle[1]}%")
+            #print(f"RPM={int(rpm + 0.5)}\n")
 
-            print(f"RPM={int(rpm + 0.5)}\n")
+            # If exporting to Prometheus is enabled, update metrics every loop.
+            if ENABLE_PROMETHEUS_EXPORTER:
+                p.update_metrics(temperature, rpm, duty_cycle[1])
 
             # Wait until desired loop duration is reached until starting the
             # next loop.
