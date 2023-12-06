@@ -12,28 +12,53 @@ import numpy as np
 import pigpio # http://abyz.co.uk/rpi/pigpio/python.html
 import prometheus_client as prom
 import os
-import json
+import configparser
+import ast
 
+PATH_CONFIG_FILE = './fan-controller.conf'
 
+def read_config(path):
+    """
+    Function to parse config file and return parsed config as dictionary.
+    """
+    def represents_int(s):
+        try: 
+            int(s)
+        except ValueError:
+            return False
+        else:
+            return True
+    
+    # Create ConfigParser object and read config file at given path.
+    config = configparser.ConfigParser()
+    config.read(path)
 
-# Set GPIO pin numbers (BCM naming). See https://pinout.xyz/
-PWM_GPIO = 18
-RPM_GPIO = 24
+    # Create dictionary to hold read key=value pairs.
+    config_dictionary = {}
 
-# Set interval time in seconds at which temperature and rpm are to be measured
-LOOP_DURATION = 5
+    # Loop through config file and append dictionary.
+    for section in config.sections():
+        for option in config.options(section):
+            value = config.get(section, option)
+            # If value starts and end with square brackets, e.g. a list,
+            # convert it to a list object by take the string literal.
+            if value.startswith('[') and value.endswith(']'):
+                value = ast.literal_eval(value)
+            # Check if value is an integer and convert it to avoid
+            # writing int(config['KEY´]) everytime it is an integer.
+            if type(value) is str and represents_int(value):
+                value = int(value)
+            # Convert the strings containing 'True' or 'False' to booleans. 
+            if type(value) is str and value.lower() == 'true':
+                value = True
+            elif type(value) is str and value.lower() == 'false':
+                value = False
+            # ConfigParser convert all keys to lowercase. To match the given
+            # names in the config file and to be compliant with Python's naming
+            # convention for static variables, convert them to uppercase.
+            config_dictionary[option.upper()] = value
 
-HYSTERESIS = 2
-HYSTERESIS_STUCK_COUNTER = 10
-
-# Set path to file which contains the measured temperature of the ds18b20
-# temperature sensor
-PATH_TEMPERATURE_FILE = "/sys/bus/w1/devices/28-00000ca660dd/w1_slave"
-ENABLE_LOCAL_EXPORT = True
-PATH_EXPORT_FILE = "/tmp/fan-controller/latest-values.json"
-
-ENABLE_PROMETHEUS_EXPORTER = True
-PROMETHEUS_PORT = 8080
+    return config_dictionary
 
 class FanController:
     """
@@ -164,8 +189,7 @@ class FanController:
 
         return temperature
 
-
-    def get_duty_cycle(self, temperature):
+    def get_duty_cycle(self, temperature, config):
         """
         Function to determine and periodically reevaluate the desired 
         duty cycle.
@@ -177,9 +201,9 @@ class FanController:
         # preferences, location, season, etc.
         #
         # Set these to your liking.
-        duty_cycle_min = 51
-        duty_cycle_max = 255
-        thresholds = [22, 27, 32, 40]
+        duty_cycle_min = config['DUTY_CYCLE_MIN']
+        duty_cycle_max = config['DUTY_CYCLE_MAX']
+        thresholds = config['THRESHOLDS']
         # TODO
 
         # Generate further values with equal spacing between the lowest and 
@@ -212,7 +236,8 @@ class FanController:
                     # cycle's thresholds. If not, set flag to False to enter
                     # the section to set the duty cycle value.
                     if duty_cycle_values[i] == duty_cycle_value \
-                            and (temperature < (thresholds[i-1] - HYSTERESIS) \
+                            and (temperature < (thresholds[i-1] \
+                            - config['HYSTERESIS']) \
                             or temperature >= thresholds[i]):
                         
                         self.from_higher_threshold = False
@@ -221,7 +246,8 @@ class FanController:
                 # highest duty cycle value is linked to the highest threshold.
                 else:
                     if duty_cycle_values[-1] == duty_cycle_value \
-                            and (temperature < (thresholds[-1] - HYSTERESIS)):
+                            and (temperature < (thresholds[-1] \
+                            - config['HYSTERESIS'])):
                         
                         self.from_higher_threshold = False
                         break
@@ -237,7 +263,7 @@ class FanController:
             # the controller reevaluate its duty cycle setting after 5
             # minutes of being stuck in the hysteresis.
             self.counter += 1
-            if self.counter > HYSTERESIS_STUCK_COUNTER:
+            if self.counter > config['HYSTERESIS_STUCK_COUNTER']:
                 self.from_higher_threshold = False
                 self.counter = 0    # Reset counter
 
@@ -341,12 +367,16 @@ def main():
 
     # Create pi object with pigpio's pi class.
     pi = pigpio.pi()
+
+    # Read configuration file
+    config = read_config(PATH_CONFIG_FILE)
+    print(config)
     # Create fan controller object of FanController class.
-    p = FanController(pi, RPM_GPIO)
+    p = FanController(pi, config['RPM_GPIO'])
 
     # If exporting with Prometheus is enabled, initalize metrics and server.
-    if ENABLE_PROMETHEUS_EXPORTER:
-        p.init_prometheus_exporter(PROMETHEUS_PORT)
+    if config['ENABLE_PROMETHEUS_EXPORTER']:
+        p.init_prometheus_exporter(config['PROMETHEUS_PORT'])
 
     ### M A I N   L O O P
     try:
@@ -357,32 +387,33 @@ def main():
             ### G A T H E R   V A L U E S
 
             # Get temperature from sensor and round it to one decimal place.
-            temperature = round(p.get_temperature(PATH_TEMPERATURE_FILE), 1)
+            temperature = round(p.get_temperature(\
+                config['PATH_TEMPERATURE_FILE']), 1)
             # Get duty cycle value accordingly to temperature.
-            duty_cycle_percent, duty_cycle_decimal = \
-                p.get_duty_cycle(temperature)
+            duty_cycle_decimal, duty_cycle_percent = \
+                p.get_duty_cycle(temperature, config)
             # Get RPM and convert to rounded integer.
             rpm = round(p.get_rpm())
             
             ### S E T   V A L U E S
 
             # Set PWM duty cycle and send it to fan.
-            pi.set_PWM_dutycycle(PWM_GPIO, duty_cycle_percent)
+            pi.set_PWM_dutycycle(config['PWM_GPIO'], duty_cycle_decimal)
 
             ### E X P O R T I N G
 
             # If exporting to local file is enabled, export.
-            if ENABLE_LOCAL_EXPORT:
-                p.export_values(PATH_EXPORT_FILE, temperature, rpm, \
+            if config['ENABLE_LOCAL_EXPORT']:
+                p.export_values(config['PATH_EXPORT_FILE'], temperature, rpm, \
                     duty_cycle_decimal)
             # If exporting to Prometheus is enabled, update metrics every loop.
-            if ENABLE_PROMETHEUS_EXPORTER:
-                p.update_metrics(temperature, rpm, duty_cycle_decimal)
+            if config['ENABLE_PROMETHEUS_EXPORTER']:
+                p.update_metrics(temperature, rpm, duty_cycle_percent)
 
             ### w A I T I N G   R O O M
 
             # Wait until loop duration is reached until starting next loop.
-            while (time.time() - time_start) < LOOP_DURATION:
+            while (time.time() - time_start) < config['LOOP_DURATION']:
                 time.sleep(0.2)
 
     ### S T U F F   T O   D O   A F T E R   S T O P P I N G   S C R I P T
