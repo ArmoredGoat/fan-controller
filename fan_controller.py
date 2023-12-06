@@ -7,58 +7,10 @@ Based on the script read_RPM.py (2016-01-20; Public Domain) found under
 https://abyz.me.uk/rpi/pigpio/examples.html as "RPM Monitor"
 """
 
-import time
 import numpy as np
 import pigpio # http://abyz.co.uk/rpi/pigpio/python.html
 import prometheus_client as prom
 import os
-import configparser
-import ast
-
-PATH_CONFIG_FILE = './fan-controller.conf'
-
-def read_config(path):
-    """
-    Function to parse config file and return parsed config as dictionary.
-    """
-    def represents_int(s):
-        try: 
-            int(s)
-        except ValueError:
-            return False
-        else:
-            return True
-    
-    # Create ConfigParser object and read config file at given path.
-    config = configparser.ConfigParser()
-    config.read(path)
-
-    # Create dictionary to hold read key=value pairs.
-    config_dictionary = {}
-
-    # Loop through config file and append dictionary.
-    for section in config.sections():
-        for option in config.options(section):
-            value = config.get(section, option)
-            # If value starts and end with square brackets, e.g. a list,
-            # convert it to a list object by take the string literal.
-            if value.startswith('[') and value.endswith(']'):
-                value = ast.literal_eval(value)
-            # Check if value is an integer and convert it to avoid
-            # writing int(config['KEY´]) everytime it is an integer.
-            if type(value) is str and represents_int(value):
-                value = int(value)
-            # Convert the strings containing 'True' or 'False' to booleans. 
-            if type(value) is str and value.lower() == 'true':
-                value = True
-            elif type(value) is str and value.lower() == 'false':
-                value = False
-            # ConfigParser convert all keys to lowercase. To match the given
-            # names in the config file and to be compliant with Python's naming
-            # convention for static variables, convert them to uppercase.
-            config_dictionary[option.upper()] = value
-
-    return config_dictionary
 
 class FanController:
     """
@@ -357,70 +309,3 @@ class FanController:
         # Write dictionary as string to file.
         with open(path, "w") as file:
             file.write(f"{values}")
-
-def main():
-    """
-    Main function to aggregate and call other needed functions.
-    """
-
-    ### I N I T I A L I Z A T I O N
-
-    # Create pi object with pigpio's pi class.
-    pi = pigpio.pi()
-
-    # Read configuration file
-    config = read_config(PATH_CONFIG_FILE)
-    print(config)
-    # Create fan controller object of FanController class.
-    p = FanController(pi, config['RPM_GPIO'])
-
-    # If exporting with Prometheus is enabled, initalize metrics and server.
-    if config['ENABLE_PROMETHEUS_EXPORTER']:
-        p.init_prometheus_exporter(config['PROMETHEUS_PORT'])
-
-    ### M A I N   L O O P
-    try:
-        while True:
-            # Set start time to determine when the next loop should start.
-            time_start = time.time()
-
-            ### G A T H E R   V A L U E S
-
-            # Get temperature from sensor and round it to one decimal place.
-            temperature = round(p.get_temperature(\
-                config['PATH_TEMPERATURE_FILE']), 1)
-            # Get duty cycle value accordingly to temperature.
-            duty_cycle_decimal, duty_cycle_percent = \
-                p.get_duty_cycle(temperature, config)
-            # Get RPM and convert to rounded integer.
-            rpm = round(p.get_rpm())
-            
-            ### S E T   V A L U E S
-
-            # Set PWM duty cycle and send it to fan.
-            pi.set_PWM_dutycycle(config['PWM_GPIO'], duty_cycle_decimal)
-
-            ### E X P O R T I N G
-
-            # If exporting to local file is enabled, export.
-            if config['ENABLE_LOCAL_EXPORT']:
-                p.export_values(config['PATH_EXPORT_FILE'], temperature, rpm, \
-                    duty_cycle_decimal)
-            # If exporting to Prometheus is enabled, update metrics every loop.
-            if config['ENABLE_PROMETHEUS_EXPORTER']:
-                p.update_metrics(temperature, rpm, duty_cycle_percent)
-
-            ### w A I T I N G   R O O M
-
-            # Wait until loop duration is reached until starting next loop.
-            while (time.time() - time_start) < config['LOOP_DURATION']:
-                time.sleep(0.2)
-
-    ### S T U F F   T O   D O   A F T E R   S T O P P I N G   S C R I P T
-    finally:
-        p.clean_up(pi)
-
-
-# Call main() function if this file is run directly instead of being imported.
-if __name__ == "__main__":
-    main()
