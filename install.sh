@@ -6,7 +6,7 @@
 path_git_dir=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 
 # Define necessary modules that are not already included in Python3.
-python_modules=("numpy" "pigpio" "prometheus_client")
+python_modules=("numpy" "pigpio" "prometheus-client")
 
 # Copy configuration file to ~/.config/fan-controller/
 path_config_dir="$HOME/.config/fan-controller"
