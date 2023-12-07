@@ -26,6 +26,10 @@ create_directory () {
 
 install_python3_module() {
     # Function to check if python modules are installed. If not, install them.
+    
+    # Update package lists.
+    sudo apt update
+
     for module in "$1"; do
         if ! python3 -c "import $module" &> /dev/null; then
             echo "Installing $module..."
@@ -42,18 +46,18 @@ install_python3_module $modules
 # Create directories for config and service files.
 create_directory $path_config_dir $path_service_dir
 
-# Move config file in correct directory.
-mv $path_git_dir/config/fan-controller.conf $path_config_dir
+# Copy config file in correct directory.
+cp $path_git_dir/config/fan-controller.conf $path_config_dir
 
-# Move service file in service directory.
-mv $path_git_dir/config/fan-controller.service $path_service_dir
+# Copy service file in service directory.
+cp $path_git_dir/config/fan-controller.service $path_service_dir
 
-# Set WorkingDirectory and ExecStart to the correct path.
+# Set WorkingDirectory and ExecStart in service file to the correct path.
 sed -i "s#^WorkingDirectory=#&$path_git_dir\/scripts#" \
-    $path_git_dir/config/fan-controller.service
+    $path_service_dir/config/fan-controller.service
 
 sed -i "s#^ExecStart=#&$path_git_dir\/scripts\/main.py#" \
-    $path_git_dir/config/fan-controller.service
+    $path_service_dir/config/fan-controller.service
 
 # Enable user-lingering. User lingering is a feature of systemd that keeps a 
 # user session running after logouts, which allows users who are not logged 
