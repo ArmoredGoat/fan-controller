@@ -1,0 +1,14 @@
+[Unit]
+Description=Fan Controller
+After=network.target
+
+[Service]
+# WorkingDirectory and ExecStart will be set by install.sh.
+
+WorkingDirectory=
+ExecStart=
+
+Restart=always
+
+[Install]
+WantedBy=default.target
