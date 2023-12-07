@@ -21,21 +21,14 @@ create_directory () {
     fi
 }
 
-install_python3_module() {
-    # Function to check if python modules are installed. If not, install them.
-    
-    for module in "$1"; do
-        if ! python3 -c "import $module" &> /dev/null; then
-            echo "Installing $module..."
-            sudo apt install -y python3-$module
-        fi
-    done
-}
-
 ### S E C T I O N   W H E R E   S T U F F   G E T S   D O N E
 
-# Install necessary Python3 modules.
-install_python3_module $modules
+# Loop through modules and check if it is installed. If not, install it.
+for module in $python_modules; do
+    if ! python3 -c "import $module" &> /dev/null; then
+        sudo apt install python3-$module -y
+    fi
+done
 
 # Create directories for config and service files.
 create_directory $path_config_dir $path_service_dir
