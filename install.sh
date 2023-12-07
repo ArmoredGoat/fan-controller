@@ -16,11 +16,8 @@ path_service_dir="$HOME/.config/systemd/user"
 
 create_directory () {
 	# Funciton to check if directories exists. If not, create them.
-	if [[ -d $@ ]]; then
-        printf "Directory '$@': already existent.\n"
-    else
+	if [[ ! -d $@ ]]; then
         mkdir -p $@
-        printf "Directory '$@': created.\n"
     fi
 }
 
