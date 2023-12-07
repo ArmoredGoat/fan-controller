@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 import time
 import pigpio
-import fan_controller
-import config_reader
+from modules import fan_controller
+from modules import config_reader
 
 """
 ArmoredGoat's Fan Controller for 4-pin fans.
