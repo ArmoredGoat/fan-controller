@@ -24,7 +24,7 @@ create_directory () {
 ### S E C T I O N   W H E R E   S T U F F   G E T S   D O N E
 
 # Loop through modules and check if it is installed. If not, install it.
-for module in $python_modules; do
+for module in ${python_modules[@]}; do
     if ! python3 -c "import $module" &> /dev/null; then
         sudo apt install python3-$module -y
     fi
