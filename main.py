@@ -4,7 +4,12 @@ import pigpio
 import fan_controller
 import config_reader
 
-PATH_CONFIG_FILE = './fan-controller.conf'
+"""
+ArmoredGoat's Fan Controller for 4-pin fans.
+
+Based on the script read_RPM.py (2016-01-20; Public Domain) found under 
+https://abyz.me.uk/rpi/pigpio/examples.html as "RPM Monitor"
+"""
 
 def main():
     """
@@ -16,15 +21,15 @@ def main():
     # Create pi object with pigpio's pi class.
     pi = pigpio.pi()
 
-    # Read configuration file
-    config = config_reader.read_config(PATH_CONFIG_FILE)
+    # Expand Read configuration file.
+    config = config_reader.read_config()
 
     # Create fan controller object of FanController class.
-    p = fan_controller.FanController(pi, config['RPM_GPIO'])
+    fc = fan_controller.FanController(pi, config['RPM_GPIO'])
 
     # If exporting with Prometheus is enabled, initalize metrics and server.
     if config['ENABLE_PROMETHEUS_EXPORTER']:
-        p.init_prometheus_exporter(config['PROMETHEUS_PORT'])
+        fc.init_prometheus_exporter(config['PROMETHEUS_PORT'])
 
     ### M A I N   L O O P
     try:
@@ -35,28 +40,29 @@ def main():
             ### G A T H E R   V A L U E S
 
             # Get temperature from sensor and round it to one decimal place.
-            temperature = round(p.get_temperature(\
+            temperature = round(fc.get_temperature(\
                 config['PATH_TEMPERATURE_FILE']), 1)
+    
             # Get duty cycle value accordingly to temperature.
-            duty_cycle_decimal, duty_cycle_percent = \
-                p.get_duty_cycle(temperature, config)
+            duty_cycle = fc.get_duty_cycle(temperature, config)
+
             # Get RPM and convert to rounded integer.
-            rpm = round(p.get_rpm())
+            rpm = round(fc.get_rpm())
             
             ### S E T   V A L U E S
 
             # Set PWM duty cycle and send it to fan.
-            pi.set_PWM_dutycycle(config['PWM_GPIO'], duty_cycle_decimal)
+            pi.set_PWM_dutycycle(config['PWM_GPIO'], duty_cycle)
 
             ### E X P O R T I N G
 
             # If exporting to local file is enabled, export.
             if config['ENABLE_LOCAL_EXPORT']:
-                p.export_values(config['PATH_EXPORT_FILE'], temperature, rpm, \
-                    duty_cycle_decimal)
+                fc.export_values(config['PATH_EXPORT_FILE'], temperature, rpm, \
+                    duty_cycle)
             # If exporting to Prometheus is enabled, update metrics every loop.
             if config['ENABLE_PROMETHEUS_EXPORTER']:
-                p.update_metrics(temperature, rpm, duty_cycle_percent)
+                fc.update_metrics(temperature, rpm, duty_cycle)
 
             ### w A I T I N G   R O O M
 
@@ -64,9 +70,9 @@ def main():
             while (time.time() - time_start) < config['LOOP_DURATION']:
                 time.sleep(0.2)
 
-    ### S T U F F   T O   D O   A F T E R   S T O P P I N G   S C R I P T
+    ### S T U F F   T O   D O   A F T E R   S T O P P I N G   S E R V I C E
     finally:
-        p.clean_up(pi)
+        fc.clean_up(pi)
 
 
 # Call main() function if this file is run directly instead of being imported.
