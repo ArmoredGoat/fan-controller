@@ -43,7 +43,7 @@ cp $path_git_dir/config/fan-controller.service $path_service_dir
 sed -i "s#^WorkingDirectory=#&$path_git_dir\/scripts#" \
     $path_service_dir/fan-controller.service
 
-sed -i "s#^ExecStart=#&$path_git_dir\/scripts\/main.py#" \
+sed -i "s#^ExecStart=#&/usr/bin/python3 $path_git_dir\/scripts\/main.py#" \
     $path_service_dir/fan-controller.service
 
 # Enable user-lingering. User lingering is a feature of systemd that keeps a 
