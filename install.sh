@@ -27,10 +27,6 @@ create_directory () {
 install_python3_module() {
     # Function to check if python modules are installed. If not, install them.
     
-    # Update package lists.
-    echo "Updating package lists..."
-    sudo apt update
-
     for module in "$1"; do
         if ! python3 -c "import $module" &> /dev/null; then
             echo "Installing $module..."
