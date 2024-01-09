@@ -122,3 +122,28 @@ sudo systemctl enable pigpiod.service
 3. Restart
 
 After a restart, the changes from step 1 will be applied and previously enabled services will be started.
+
+## Known problems/bugs
+
+### Random upspin of fans
+
+Sometimes, all fans spin at their maximum speed for one cycle. Will investigate on that later...
+
+## Further steps
+
+- Fix random spin ups
+- Ditch breadboard
+
+Right now, a mess of zip ties and wires resides inside my server rack. In the following month, I want to learn to design a circuit board. This board should be able to hold all components in a compact form factor. There should be only one power cable to power the Pi and the fans, an ethernet cable and a cable with the temperature sensor to put the sensor to the desired place. Everything else should be internal.
+
+![](https://github.com/ArmoredGoat/fan-controller/assets/89848245/502d9bfa-419e-4d2b-996a-0c25f91e3833)
+
+Afterwards, I will design a case to print for everything.
+
+## How to contribute
+
+Please let me know if you run into errors or problems that shouldn't be there by opening an issue.
+
+Check the section above. Maybe there is something you want to help with or you could give a hint for.
+
+I am grateful for any advice that might improve this project.
